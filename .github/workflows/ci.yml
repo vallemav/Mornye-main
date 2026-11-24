@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -404,3 +405,12 @@ jobs:
           path: |
             build/symbols/android/
             build/app/outputs/mapping/release/mapping.txt
+
+      - name: Retain Android release APKs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mornye-5.3.1-apk
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            build/app/outputs/flutter-apk/*.apk

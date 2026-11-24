@@ -1,0 +1,98 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build-android-apk:
+    name: Build Android Release APK
+    runs-on: ubuntu-latest
+    env:
+      MORNYE_DISCORD_SDK: "0"
+
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/.ghcup
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          flutter-version-file: .fvmrc
+          cache: true
+
+      - name: Prepare Flutter framework patch
+        run: dart scripts/prepare_flutter_sdk.dart
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.8.2"
+
+      - name: Install Android SDK & NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;30.0.16248370" \
+            "platforms;android-37.0" \
+            "build-tools;37.0.0" \
+            "cmake;4.1.2"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
+
+      - name: Get Flutter dependencies
+        run: |
+          flutter pub get
+          dart scripts/gen_l10n.dart
+
+      - name: Configure Flutter SDK for Gradle
+        run: echo "flutter.sdk=$FLUTTER_ROOT" > android/local.properties
+
+      - name: Install Rust application build prerequisites
+        run: |
+          cd rust_backend
+          rustup show
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev ffmpeg
+
+      - name: Cache Cargo registry and build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            rust_backend/target
+          key: cargo-${{ runner.os }}-android-${{ hashFiles('rust_backend/rust-toolchain.toml') }}-${{ hashFiles('rust_backend/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-android-${{ hashFiles('rust_backend/rust-toolchain.toml') }}-
+
+      - name: Build Rust release application
+        run: bash scripts/build_android.sh --lite --target lib/main.dart
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mornye-5.3.1-APKs
+          path: build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
